@@ -63,7 +63,10 @@ rootfs:
 cmd: ["/bin/sh", "/start.sh"]
 EOF
 
-# 4) 构建推送（Docker Hub 限流时 pull-base 已内置 mirror 兜底，这里无需处理）
+# 4) 登录并构建推送
+[ -n "$ORG" ] || { echo "无法从 token 解析组织名"; exit 1; }
+printf '%s' "$TOKEN" | unikraft login --token=- --organization "$ORG" >/dev/null
+echo "已登录 org=$ORG"
 unikraft build _img --output "$ORG/$NAME:latest"
 echo "完成: $ORG/$NAME:latest"
 echo "部署: PROJECT_NAME=$NAME APP_PORT=<应用端口> REGIONS=sin bash scripts/deploy.sh deploy"

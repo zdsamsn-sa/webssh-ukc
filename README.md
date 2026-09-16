@@ -40,7 +40,7 @@
 
 - 单一进程监听 HTTP 端口（默认 8888）
 - 不依赖 systemd / Docker-in-Docker
-- 官方已有 Docker 镜像，可用与 Komari 相同的 **anyimage 导入** 流程
+- 本方案在 CI 中 **从源码编译静态二进制**（避免官方 Docker 镜像 `start.sh & tail -f` 不适合 unikernel，以及未 login 就 build 的问题）
 
 ### 可用性结论
 
@@ -118,7 +118,7 @@ GitHub 仓库 → **Actions** → **Deploy WebSSH to Unikraft Cloud** → **Run 
 | 项目名 | `webssh` |
 | 地区 | 离你近的，如新加坡 `sin` |
 | 内存 | `512` |
-| 镜像 | `eooce/webssh:latest`（默认即可） |
+| （已改为源码构建，无需填镜像） | |
 
 ### 步骤 3：等待完成
 
@@ -126,9 +126,9 @@ GitHub 仓库 → **Actions** → **Deploy WebSSH to Unikraft Cloud** → **Run 
 
 ```text
 安装 unikraft CLI
-→ 拉取 eooce/webssh 镜像层做 rootfs
-→ 生成 start.sh（还原 ENTRYPOINT/CMD/ENV）
-→ unikraft build 推送到你的 org
+→ 安装 Go，编译 linux/amd64 静态二进制
+→ 基于 alpine 组装 rootfs + 正确前台启动脚本
+→ unikraft login 后 build 推送到你的 org
 → 创建 service（443→8888）并启动实例
 ```
 
@@ -232,28 +232,31 @@ Actions → **Destroy** → `target` 填 `webssh`（或你的项目名）或 `al
 ```text
 webssh-ukc/
 ├── .github/workflows/
-│   ├── deploy.yml      # 导入镜像并部署
-│   └── destroy.yml     # 清理资源
+│   ├── deploy.yml         # 源码构建并部署
+│   └── destroy.yml
+├── app/                   # WebSSH 源码（Go + 已构建 public/）
+│   ├── main.go
+│   ├── controller/ core/
+│   └── public/
 ├── scripts/
-│   ├── anyimage.sh     # Docker/OCI 镜像 → UKC 镜像
-│   ├── deploy.sh       # 创建 service / 启动实例 / 注入环境变量
-│   └── pull-base.py    # 拉镜像层
-├── .gitignore
+│   ├── build-webssh.sh    # 编译静态二进制 + 推 UKC 镜像
+│   ├── deploy.sh
+│   ├── anyimage.sh        # 通用镜像导入（已修 login）
+│   └── pull-base.py
 └── README.md
 ```
-
-应用代码在官方镜像内，本仓库只负责 **UKC 一键发布流水线**。
 
 ### 部署链路
 
 ```text
-anyimage.sh eooce/webssh:latest
-  → 拉 rootfs + 生成 /start.sh
-  → unikraft build → $ORG/webssh:latest
+go build（CGO_ENABLED=0, linux/amd64）
+  → alpine rootfs + /webssh/webssh
+  → start.sh 前台 exec（读 PORT / USER / PASS）
+  → unikraft login + build → $ORG/webssh:latest
 deploy.sh deploy
   → service: 443:8888/tls+http
   → 注入 PORT / USER / PASS / authInfo
-  → unikraft run（常驻，scale-to-zero=off）
+  → unikraft run（常驻）
 ```
 
 ---
@@ -286,7 +289,9 @@ deploy.sh deploy
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
 | Actions 失败缺 token | 未配 Secret | 配置 `UNIKRAFT_API_TOKEN` |
-| 拉镜像失败 | Docker Hub 限流/网络 | 重试；或换 `ghcr.io/...` 若你有自建镜像 |
+| 拉镜像失败 | Docker Hub 限流/网络 | 本方案已改为源码构建，不再依赖该镜像 |
+| `profile not setup` / 未 login | anyimage 在 build 前未 login | 已修复；请用新版包重新部署 |
+| 实例秒退 / CPU 0 | Docker CMD 为 `start.sh & tail -f` | 已改为前台 `exec ./webssh` |
 | `No image` | 镜像同步延迟 | 脚本已重试；再跑一次 Deploy |
 | 打开域名无服务 | 未绑定自定义域 | 见第 5 节 `services edit` |
 | 页面无 Basic 认证 | 未设 USER/PASS | 配置 Secrets 后重新部署 |
