@@ -20,15 +20,10 @@ on:
           - sfo - 美国旧金山
           - was - 美国华盛顿特区
       memory_mb:
-        description: "内存 MB（256 通常足够，默认 512）"
+        description: "内存 MB（默认 512）"
         required: false
         type: string
         default: "512"
-      image_ref:
-        description: "Docker 镜像（默认 eooce/webssh:latest）"
-        required: false
-        type: string
-        default: "eooce/webssh:latest"
 
 concurrency:
   group: deploy-webssh
@@ -43,13 +38,18 @@ jobs:
       REGIONS: ${{ inputs.regions || vars.DEPLOY_REGIONS || 'sin' }}
       MEMORY_MB: ${{ inputs.memory_mb || vars.MEMORY_MB || '512' }}
       APP_PORT: ${{ vars.APP_PORT || '8888' }}
-      # Web 登录认证（强烈建议配置，否则任何人可打开页面去连 SSH）
       WEBSSH_USER: ${{ secrets.WEBSSH_USER || vars.WEBSSH_USER || '' }}
       WEBSSH_PASS: ${{ secrets.WEBSSH_PASS || vars.WEBSSH_PASS || '' }}
       SAVE_PASS: ${{ vars.SAVE_PASS || 'true' }}
       TRACE_KEY: ${{ vars.TRACE_KEY || '' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: app/go.sum
 
       - name: 安装 unikraft CLI
         run: |
@@ -59,15 +59,8 @@ jobs:
           sudo mv /tmp/unikraft /usr/local/bin/unikraft
           unikraft version || true
 
-      - name: 导入 WebSSH 镜像
-        run: |
-          REF="${{ inputs.image_ref || 'eooce/webssh:latest' }}"
-          # 兼容 docker.io 前缀
-          case "$REF" in
-            ghcr.io/*|docker.io/*) ;;
-            *) REF="docker.io/$REF" ;;
-          esac
-          bash scripts/anyimage.sh "$REF" "${{ env.PROJECT_NAME }}"
+      - name: 从源码构建并推送镜像
+        run: bash scripts/build-webssh.sh "${{ env.PROJECT_NAME }}"
 
       - name: 部署实例
         run: bash scripts/deploy.sh deploy
